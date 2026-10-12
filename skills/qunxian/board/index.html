@@ -1,0 +1,386 @@
+<!doctype html>
+<!--
+  群贤看板 —— 网页部分（原生 HTML/CSS/JS，无第三方库）
+
+  页面结构（从上到下）：
+    1. 顶栏：会议标题、状态、已用时间、主席、历史会议切换
+    2. 进度条：每一轮 + 报告
+    3. 成员卡片：数量不限，每人一张（头像颜色来自配置），显示模型、思考档位、匿名代号、反方、累计耗时和用量
+    4. 发言矩阵：每轮一行，和成员卡片对齐；格子里有状态、耗时、字数、预览
+    5. 综合报告：Markdown 排版
+    6. 抽屉：点任意发言格子，从右边滑出全文
+
+  界面语言跟随会议的 language（zh / en）。每 2 秒刷新；数据没变就不重画，避免闪烁。
+-->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>群贤看板</title>
+<style>
+  /* ========== 颜色：浅色、深色两套，跟随系统 ========== */
+  :root {
+    --bg: #f4f3ef; --surface: #ffffff; --surface-2: #f8f7f4; --text: #1c1b19; --muted: #77746d;
+    --faint: #a9a59c; --line: #e6e3dc; --shadow: 0 1px 2px rgba(30,25,15,.05), 0 4px 16px rgba(30,25,15,.05);
+    --run: #1f9d55; --run-bg: #e4f5ea; --done: #2f63d6; --done-bg: #e6edfb;
+    --fail: #cf3c3c; --fail-bg: #fbe7e7; --wait: #a9a59c; --devil: #b26a00; --devil-bg: #fdf0da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --surface: #1f1e1c; --surface-2: #262522; --text: #ecebe7; --muted: #a19d94;
+      --faint: #6f6b63; --line: #33312d; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+      --run: #43d07f; --run-bg: #173523; --done: #7aa2ff; --done-bg: #1c2742;
+      --fail: #ff7070; --fail-bg: #3d1d1d; --wait: #6f6b63; --devil: #f0b04f; --devil-bg: #3a2b12;
+    }
+  }
+
+  /* ========== 基础排版 ========== */
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.6 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 24px 20px 60px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+
+  /* ========== 1. 顶栏 ========== */
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+  h1 { font-size: 24px; line-height: 1.3; margin: 4px 0 8px; letter-spacing: -.01em; }
+  .sub { display: flex; gap: 6px 14px; flex-wrap: wrap; color: var(--muted); font-size: 13px; align-items: center; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill.live { background: var(--run-bg); color: var(--run); }
+  .pill.over { background: var(--done-bg); color: var(--done); }
+  select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line);
+           border-radius: 10px; padding: 7px 10px; max-width: 300px; }
+  .topic-toggle { margin-top: 14px; padding: 12px 16px; }
+  .topic-toggle summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .topic-toggle pre { white-space: pre-wrap; font: inherit; margin: 10px 0 0; }
+
+  /* ========== 2. 进度条 ========== */
+  .steps { display: grid; grid-template-columns: repeat(var(--steps), 1fr); gap: 8px; margin: 22px 0 18px; }
+  .step { padding: 10px 12px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); }
+  .step .bar { height: 4px; border-radius: 4px; background: var(--line); margin-bottom: 8px; overflow: hidden; }
+  .step .bar i { display: block; height: 100%; background: var(--done); border-radius: 4px; transition: width .4s; }
+  .step.active .bar i { background: var(--run); }
+  .step b { font-size: 13px; display: block; }
+  .step span { font-size: 12px; color: var(--muted); }
+
+  /* ========== 3 & 4. 成员 + 发言矩阵：左列是轮次标题，右边每个成员一列；成员多时可以横向滚动 ========== */
+  .scroller { overflow-x: auto; padding: 4px 2px 8px; margin: 0 -2px; }
+  .matrix { display: grid; grid-template-columns: 96px repeat(var(--n), minmax(170px, 1fr)); gap: 10px; align-items: stretch; }
+  .rowlabel { display: flex; flex-direction: column; justify-content: center; }
+  .rowlabel b { font-size: 14px; }
+  .rowlabel span { font-size: 12px; color: var(--muted); }
+
+  .member { padding: 14px; display: flex; flex-direction: column; gap: 8px; position: relative; overflow: hidden; }
+  .member::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--c); }
+  .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .avatar { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none;
+            background: var(--c); color: #fff; font-weight: 700; font-size: 15px; }
+  .who > div { min-width: 0; }
+  .who b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .who small { color: var(--muted); font-size: 12px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag { font-size: 11px; padding: 1px 8px; border-radius: 6px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+  .tag.devil { background: var(--devil-bg); color: var(--devil); border-color: transparent; font-weight: 600; }
+  .stats { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12px; color: var(--muted); }
+  .stats span { white-space: nowrap; }
+  .stats b { color: var(--text); font-weight: 600; }
+
+  .cell { padding: 12px 13px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; min-height: 120px;
+          transition: transform .15s, border-color .15s; border-top: 3px solid var(--line); }
+  .cell:hover { transform: translateY(-2px); border-color: var(--c); }
+  .cell.waiting { cursor: default; background: var(--surface-2); box-shadow: none; }
+  .cell.waiting:hover { transform: none; border-color: var(--line); }
+  .cell.running { border-top-color: var(--run); }
+  .cell.done { border-top-color: var(--c); }
+  .cell.failed { border-top-color: var(--fail); }
+  .status { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px; font-weight: 600; white-space: nowrap; flex: none; }
+  .chip.waiting { color: var(--wait); }
+  .chip.running { color: var(--run); background: var(--run-bg); }
+  .chip.done { color: var(--done); background: var(--done-bg); }
+  .chip.failed { color: var(--fail); background: var(--fail-bg); }
+  /* 格子顶部的"色点 + 成员名"：只在窄屏显示（宽屏时格子和成员卡片上下对齐，不用重复） */
+  .mname { display: none; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; min-width: 0; }
+  .mname i { width: 8px; height: 8px; border-radius: 3px; background: var(--c); flex: none; }
+  .mname em { font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .metric { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .preview { font-size: 12.5px; color: var(--muted); line-height: 1.55; display: -webkit-box; -webkit-line-clamp: 4;
+             -webkit-box-orient: vertical; overflow: hidden; }
+  .cell.failed .preview { color: var(--fail); }
+  /* 发言中：呼吸圆点 + 扫光骨架条 */
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .skeleton { height: 9px; border-radius: 5px; margin-top: 4px;
+              background: linear-gradient(90deg, var(--line) 0%, var(--surface-2) 50%, var(--line) 100%);
+              background-size: 200% 100%; animation: shimmer 1.4s infinite; }
+  @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+  /* ========== 5. 报告 ========== */
+  .report { margin-top: 24px; padding: 26px 30px; }
+  .waiting-report { margin-top: 24px; padding: 22px; text-align: center; color: var(--muted); border-style: dashed; background: transparent; box-shadow: none; }
+
+  /* Markdown 内容（报告和抽屉共用） */
+  .md h1 { font-size: 20px; margin: 18px 0 8px; }
+  .md h2 { font-size: 16px; margin: 24px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .md h3 { font-size: 14.5px; margin: 18px 0 6px; }
+  .md p { margin: 8px 0; }
+  .md ul, .md ol { padding-left: 22px; margin: 6px 0; }
+  .md li { margin: 4px 0; }
+  .md code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2);
+             border: 1px solid var(--line); padding: 1px 5px; border-radius: 5px; }
+  .md table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; display: block; overflow-x: auto; }
+  .md th, .md td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  .md th { background: var(--surface-2); font-weight: 600; }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+  .md blockquote { margin: 8px 0; padding: 4px 14px; border-left: 3px solid var(--line); color: var(--muted); }
+  .md > :first-child { margin-top: 0; }
+
+  /* ========== 6. 抽屉 ========== */
+  .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.28); opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .scrim.show { opacity: 1; pointer-events: auto; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); background: var(--surface);
+            border-left: 1px solid var(--line); transform: translateX(100%); transition: transform .25s ease;
+            display: flex; flex-direction: column; box-shadow: -8px 0 30px rgba(0,0,0,.12); }
+  .drawer.show { transform: none; }
+  .drawer header { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .drawer header .grow { flex: 1; min-width: 0; }
+  .drawer header small { color: var(--muted); }
+  .drawer .body { padding: 18px 24px 40px; overflow-y: auto; }
+  .close { border: 0; background: var(--surface-2); color: var(--text); width: 32px; height: 32px; border-radius: 8px; font-size: 18px; cursor: pointer; }
+  .empty { text-align: center; padding: 120px 0; color: var(--muted); }
+
+  /* ========== 窄屏：每轮一块，两人一排，格子里显示成员名 ========== */
+  @media (max-width: 760px) {
+    .wrap { padding: 16px 16px 40px; }
+    h1 { font-size: 20px; }
+    .steps { grid-template-columns: repeat(2, 1fr); }
+    .scroller { overflow: visible; }
+    .matrix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rowlabel { grid-column: 1 / -1; flex-direction: row; gap: 8px; align-items: baseline; padding-top: 8px; }
+    .corner { display: none; }
+    .report { padding: 18px; }
+    .member { padding: 12px; }
+    .avatar { width: 30px; height: 30px; font-size: 14px; }
+    .mname { display: flex; }
+    .chip.done .txt { display: none; }   /* 窄屏时"已交卷"只留一个 ✓，把位置让给成员名 */
+  }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="empty">…</div></div>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer"><header></header><div class="body md"></div></aside>
+
+<script>
+// ---------- 界面文字：中英两套，跟随会议语言 ----------
+const I18N = {
+  zh: {
+    brand: "群贤 · 多模型圆桌", live: "讨论中", over: "✓ 已完成", started: "开始", running_for: "已进行", took: "用时",
+    chair: "主席", topic: "查看完整话题", rounds: [["第 1 轮", "独立作答"], ["第 2 轮", "互相批评"], ["第 3 轮", "最终立场"]],
+    report: "报告", report_sub: "综合", done: "完成", not_started: "未开始", handed: "已交卷", writing: "主席撰写中", out: "已出",
+    devil: "反方", time: "耗时", usage: "用量", host: "由主席派出", chips: { waiting: "○ 等待", running: "发言中", done: "✓<span class=\"txt\"> 已交卷</span>", failed: "✕ 失败" },
+    chars: "字", wait_report: "全部轮次结束后，主席的综合报告会出现在这里", writing_report: "讨论结束，主席正在写综合报告…",
+    still: "还在发言中…", none: "还没有会议。运行 qunxian run \"话题\"，或在 agent 里调用群贤。", offline: "连不上看板服务，请重新运行 qunxian board。",
+    effort: { off: "不思考", low: "低", medium: "中", high: "高", max: "最高" }, sec: s => s >= 60 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${s} 秒`,
+  },
+  en: {
+    brand: "Qunxian · multi-model roundtable", live: "In progress", over: "✓ Done", started: "started", running_for: "running", took: "took",
+    chair: "Chair", topic: "Show full question", rounds: [["Round 1", "Independent"], ["Round 2", "Critique"], ["Round 3", "Final"]],
+    report: "Report", report_sub: "synthesis", done: "done", not_started: "not started", handed: "answered", writing: "chair writing", out: "ready",
+    devil: "Devil's advocate", time: "Time", usage: "Tokens", host: "dispatched by chair", chips: { waiting: "○ Waiting", running: "Answering", done: "✓<span class=\"txt\"> Done</span>", failed: "✕ Failed" },
+    chars: "chars", wait_report: "The chair's synthesis will appear here after the last round", writing_report: "Discussion over — the chair is writing the report…",
+    still: "Still answering…", none: "No meetings yet. Run qunxian run \"your question\" or invoke Qunxian from your agent.", offline: "Board server unreachable. Run qunxian board again.",
+    effort: { off: "no thinking", low: "low", medium: "medium", high: "high", max: "max" }, sec: s => s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`,
+  },
+};
+let T = I18N.zh;
+
+let current = null;   // 正在看哪次会议（null = 自动跟随最新）
+let last = null;      // 最近一次的状态，抽屉从这里取全文
+let drawerKey = null; // 抽屉里正在看哪一格（"轮次|成员id"）
+let lastSig = "";     // 上一次数据的"指纹"，没变就不重画
+
+// ---------- 小工具 ----------
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const dur = sec => (sec == null ? "" : T.sec(Math.round(sec)));
+const k = n => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
+const plain = md => md.replace(/[#*`|>_-]+/g, " ").replace(/\s+/g, " ").trim();
+const inline = s => s.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+const initial = name => (name || "?").trim().charAt(0).toUpperCase();
+
+// ---------- 迷你 Markdown 渲染：标题、列表、表格、分割线、引用、段落、粗体、行内代码 ----------
+function md(src) {
+  const lines = esc(src).split("\n");
+  let html = "", i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*$/.test(line)) { i++; continue; }
+    if (/^\s*```/.test(line)) { i++; continue; }                                    // 代码块的围栏行直接跳过
+    let m;
+    if ((m = line.match(/^(#{1,4})\s+(.*)/))) { const lv = Math.min(m[1].length, 3); html += `<h${lv}>${inline(m[2])}</h${lv}>`; i++; continue; }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { html += "<hr>"; i++; continue; }
+    if (/^\s*\|/.test(line)) {                                                        // 表格
+      const rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]);
+      const cells = r => r.trim().replace(/^\||\|$/g, "").split("|").map(c => inline(c.trim()));
+      const body = rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r));
+      if (!body.length) continue;
+      html += "<table><thead><tr>" + cells(body[0]).map(c => `<th>${c}</th>`).join("") + "</tr></thead><tbody>";
+      body.slice(1).forEach(r => (html += "<tr>" + cells(r).map(c => `<td>${c}</td>`).join("") + "</tr>"));
+      html += "</tbody></table>"; continue;
+    }
+    if (/^\s*([-*]|\d+\.)\s+/.test(line)) {                                           // 列表
+      const ordered = /^\s*\d+\./.test(line);
+      html += ordered ? "<ol>" : "<ul>";
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) html += `<li>${inline(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, ""))}</li>`;
+      html += ordered ? "</ol>" : "</ul>"; continue;
+    }
+    if (/^&gt;\s?/.test(line)) { html += `<blockquote>${inline(line.replace(/^&gt;\s?/, ""))}</blockquote>`; i++; continue; }
+    const para = [];                                                                  // 普通段落
+    while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|\s*\||\s*([-*]|\d+\.)\s|&gt;|\s*```)/.test(lines[i])) para.push(lines[i++]);
+    if (para.length) html += `<p>${inline(para.join("<br>"))}</p>`; else i++;
+  }
+  return html;
+}
+
+// ---------- 主渲染 ----------
+function render(s, meetings) {
+  const app = document.getElementById("app");
+  if (!s.meeting) { app.innerHTML = `<div class="empty">${esc(T.none)}</div>`; return; }
+  T = I18N[s.language] || I18N.zh;
+  document.documentElement.lang = s.language === "en" ? "en" : "zh";
+  last = s;
+
+  const M = s.members, n = M.length, R = s.rounds.length;
+  const doneCount = s.rounds.map(r => Object.values(r).filter(c => c.state === "done" || c.state === "failed").length);
+  const started = s.rounds.map(r => Object.values(r).some(c => c.state !== "waiting"));
+  const allDone = doneCount[R - 1] === n;
+  const live = !s.report;
+  const elapsed = ((s.finished ? new Date(s.finished) : new Date()) - new Date(s.created)) / 1000;
+  const topicOpen = document.querySelector(".topic-toggle")?.open ?? false;
+  const devilName = (M.find(x => x.id === s.devil) || {}).name;
+
+  // 1. 顶栏
+  let h = `
+  <div class="top">
+    <div>
+      <div class="eyebrow">${esc(T.brand)}</div>
+      <h1>${esc(s.title)}</h1>
+      <div class="sub">
+        <span class="pill ${live ? "live" : "over"}">${live ? `<span class="dot"></span>${T.live}` : T.over}</span>
+        <span>${esc(s.created.slice(5, 16).replace("T", " "))} ${T.started}</span>
+        <span>${live ? T.running_for : T.took} ${dur(elapsed)}</span>
+        ${s.chair ? `<span>${T.chair}：${esc(s.chair)}</span>` : ""}
+      </div>
+    </div>
+    <select id="pick" aria-label="meeting">
+      ${meetings.map(m => `<option value="${esc(m.id)}" ${m.id === s.meeting ? "selected" : ""}>${m.done ? "" : "● "}${esc(m.created.slice(5, 16).replace("T", " "))} · ${esc(m.title)}</option>`).join("")}
+    </select>
+  </div>
+  <details class="topic-toggle card"${topicOpen ? " open" : ""}><summary>${T.topic}</summary><pre>${esc(s.topic)}</pre></details>`;
+
+  // 2. 进度条：每轮按交卷人数算百分比，最后一格是报告
+  h += `<div class="steps" style="--steps:${R + 1}">`;
+  s.rounds.forEach((_, i) => {
+    const active = started[i] && doneCount[i] < n;
+    const state = active ? `${doneCount[i]}/${n} ${T.handed}` : doneCount[i] === n ? T.done : T.not_started;
+    h += `<div class="step ${active ? "active" : ""}"><div class="bar"><i style="width:${(doneCount[i] / n) * 100}%"></i></div>
+          <b>${T.rounds[i][0]}</b><span>${T.rounds[i][1]} · ${state}</span></div>`;
+  });
+  h += `<div class="step ${!s.report && allDone ? "active" : ""}"><div class="bar"><i style="width:${s.report ? 100 : 0}%"></i></div>
+        <b>${T.report}</b><span>${T.report_sub} · ${s.report ? T.out : allDone ? T.writing : T.not_started}</span></div></div>`;
+
+  // 3. 成员卡片（矩阵第一行，左上角留空）
+  h += `<div class="scroller"><div class="matrix" style="--n:${n}"><div class="corner"></div>`;
+  for (const x of M) {
+    const t = s.totals[x.id] || {};
+    const sub = [x.model || x.preset || x.type, T.effort[x.effort] || x.effort].filter(Boolean).join(" · ");
+    const stats = x.type === "host" ? `<span>${T.host}</span>`
+      : [t.seconds ? `<span>${T.time} <b>${dur(t.seconds)}</b></span>` : "", t.tokens ? `<span>${T.usage} <b>${k(t.tokens)}</b></span>` : ""].join("");
+    h += `<div class="card member" style="--c:${esc(x.color)}">
+      <div class="who"><div class="avatar">${esc(initial(x.name))}</div><div><b>${esc(x.name)}</b><small>${esc(sub)}</small></div></div>
+      <div class="tags"><span class="tag">${esc(s.labels[x.id])}</span>${x.id === s.devil ? `<span class="tag devil">${T.devil}</span>` : ""}</div>
+      <div class="stats">${stats}</div>
+    </div>`;
+  }
+
+  // 4. 发言矩阵：每轮一行
+  s.rounds.forEach((row, i) => {
+    h += `<div class="rowlabel"><b>${T.rounds[i][0]}</b><span>${T.rounds[i][1]}</span></div>`;
+    for (const x of M) {
+      const c = row[x.id];
+      const chip = c.state === "running" ? `<span class="dot"></span>${T.chips.running}` : T.chips[c.state];
+      const meta = [c.seconds != null ? dur(c.seconds) : "", c.chars ? `${c.chars} ${T.chars}` : ""].filter(Boolean).join(" · ");
+      let body = "";
+      if (c.state === "running") body = `<div class="skeleton" style="width:90%"></div><div class="skeleton" style="width:70%"></div><div class="skeleton" style="width:80%"></div>`;
+      else if (c.text) body = `<div class="preview">${esc(plain(c.text).slice(0, 200))}</div>`;
+      h += `<div class="card cell ${c.state}" style="--c:${esc(x.color)}" data-key="${i}|${esc(x.id)}">
+        <div class="status"><span class="mname"><i></i><em>${esc(x.name)}</em></span><span class="chip ${c.state}">${chip}</span></div>
+        ${meta ? `<div class="metric">${meta}</div>` : ""}${body}</div>`;
+    }
+  });
+  h += `</div></div>`;
+
+  // 5. 报告
+  h += s.report ? `<section class="card report"><div class="md">${md(s.report)}</div></section>`
+                : `<div class="card waiting-report">${allDone ? T.writing_report : T.wait_report}</div>`;
+
+  const y = window.scrollY;   // 重画前记住滚动位置，重画后恢复
+  app.innerHTML = h;
+  window.scrollTo(0, y);
+  document.getElementById("pick").onchange = e => { current = e.target.value; lastSig = ""; tick(); };
+  if (drawerKey) fillDrawer();
+}
+
+// ---------- 抽屉 ----------
+function fillDrawer() {
+  const [i, id] = drawerKey.split("|");
+  const x = last.members.find(m => m.id === id);
+  const c = last.rounds[i] && last.rounds[i][id];
+  if (!x || !c) return closeDrawer();
+  const d = document.getElementById("drawer");
+  d.querySelector("header").innerHTML = `
+    <div class="avatar" style="background:${esc(x.color)}">${esc(initial(x.name))}</div>
+    <div class="grow"><b>${esc(x.name)}</b> · ${T.rounds[i][0]} ${T.rounds[i][1]}<br>
+    <small>${esc(last.labels[id])}${id === last.devil ? " · " + T.devil : ""}${c.seconds != null ? " · " + dur(c.seconds) : ""}${c.chars ? ` · ${c.chars} ${T.chars}` : ""}</small></div>
+    <button class="close" aria-label="close">×</button>`;
+  d.querySelector(".body").innerHTML = c.text ? md(c.text) : `<p style="color:var(--muted)">${T.still}</p>`;
+  d.querySelector(".close").onclick = closeDrawer;
+}
+function openDrawer(key) {
+  drawerKey = key; fillDrawer();
+  document.getElementById("drawer").classList.add("show");
+  document.getElementById("scrim").classList.add("show");
+}
+function closeDrawer() {
+  drawerKey = null;
+  document.getElementById("drawer").classList.remove("show");
+  document.getElementById("scrim").classList.remove("show");
+}
+document.addEventListener("click", e => {
+  const cell = e.target.closest(".cell");
+  if (cell && !cell.classList.contains("waiting")) openDrawer(cell.dataset.key);
+});
+document.getElementById("scrim").onclick = closeDrawer;
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+
+// ---------- 定时刷新 ----------
+async function tick() {
+  try {
+    const q = current ? `?m=${encodeURIComponent(current)}` : "";
+    const [s, list] = await Promise.all([fetch("/api/state" + q).then(r => r.json()), fetch("/api/meetings").then(r => r.json())]);
+    const sig = JSON.stringify([s, list]);
+    if (sig === lastSig && s.finished) return;   // 已结束的会议数据没变就不重画；进行中的要更新计时
+    lastSig = sig;
+    render(s, list);
+  } catch {
+    document.getElementById("app").innerHTML = `<div class="empty">${esc(T.offline)}</div>`;
+  }
+}
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

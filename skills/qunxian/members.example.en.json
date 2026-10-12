@@ -1,0 +1,40 @@
+{
+  "_note": "Qunxian config. Any number and kind of members; add or remove entries like the ones below. Never put keys here: api_key_env names an environment variable (on macOS, keychain can name a Keychain item). Run `qunxian check` after editing.",
+  "language": "en",
+  "default_preset": "standard",
+  "devil": true,
+  "chair": "gpt",
+  "word_limits": [600, 450, 450],
+  "timeout": 900,
+
+  "members": [
+    {
+      "_note": "host: answered by a subagent the chair agent dispatches itself (e.g. Claude when Claude Code is the chair). Agent mode only; `run` skips it.",
+      "id": "claude", "name": "Claude", "type": "host", "model": "opus"
+    },
+    {
+      "_note": "cli + codex preset: uses your ChatGPT subscription via the Codex CLI (install and log in first).",
+      "id": "gpt", "name": "GPT", "type": "cli", "preset": "codex"
+    },
+    {
+      "_note": "openai type: any OpenAI-compatible API. effort_style: effort / toggle / effort+toggle / none.",
+      "id": "gpt-api", "name": "GPT (API)", "type": "openai", "enabled": false,
+      "base_url": "https://api.openai.com/v1", "model": "gpt-5", "api_key_env": "OPENAI_API_KEY", "effort_style": "effort"
+    },
+    {
+      "id": "deepseek", "name": "DeepSeek", "type": "openai",
+      "base_url": "https://api.deepseek.com", "model": "deepseek-v4-pro", "cheap_model": "deepseek-flash",
+      "api_key_env": "DEEPSEEK_API_KEY", "effort_style": "toggle"
+    },
+    {
+      "id": "kimi", "name": "Kimi", "type": "openai",
+      "base_url": "https://api.moonshot.ai/v1", "model": "kimi-k3", "cheap_model": "kimi-k2.6",
+      "api_key_env": "MOONSHOT_API_KEY", "effort_style": "effort+toggle"
+    },
+    {
+      "_note": "Local model via Ollama, no key needed. enabled:false keeps it out for now.",
+      "id": "local", "name": "Local Qwen", "type": "openai", "enabled": false,
+      "base_url": "http://127.0.0.1:11434/v1", "model": "qwen3:14b", "effort_style": "none"
+    }
+  ]
+}

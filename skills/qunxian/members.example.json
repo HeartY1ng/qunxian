@@ -1,0 +1,42 @@
+{
+  "_说明": "群贤配置。成员数量、种类不限，按下面的样子增删即可。key 绝不写在这里：用 api_key_env 写环境变量的名字，Mac 上也可以用 keychain 写钥匙串条目名。改完运行 qunxian check 检查。",
+  "language": "zh",
+  "default_preset": "standard",
+  "devil": true,
+  "chair": "deepseek",
+  "word_limits": [800, 600, 600],
+  "timeout": 900,
+
+  "members": [
+    {
+      "_说明": "host：由主席 agent 自己派子 agent 作答（比如在 Claude Code 里当主席时派 Claude）。只在 agent 主席模式下有效，run 命令会跳过它。",
+      "id": "claude", "name": "Claude", "type": "host", "model": "opus"
+    },
+    {
+      "_说明": "cli + 预设 codex：走 ChatGPT 订阅，需要先装好并登录 Codex 命令行。最高档对应 xhigh，你的 Codex 支持更高档可以在 effort_values 里改。",
+      "id": "gpt", "name": "GPT", "type": "cli", "preset": "codex",
+      "effort_values": { "max": "xhigh" }
+    },
+    {
+      "_说明": "openai 类型：任何兼容 OpenAI 的接口。DeepSeek 实测只能开关思考，所以用 toggle；想更快更省就开快速预设，会换成 cheap_model。",
+      "id": "deepseek", "name": "DeepSeek", "type": "openai",
+      "base_url": "https://api.deepseek.com", "model": "deepseek-v4-pro", "cheap_model": "deepseek-flash",
+      "api_key_env": "DEEPSEEK_API_KEY", "effort_style": "toggle"
+    },
+    {
+      "_说明": "Kimi 实测档位有效，也能关掉思考，所以用 effort+toggle。",
+      "id": "kimi", "name": "Kimi", "type": "openai",
+      "base_url": "https://api.moonshot.cn/v1", "model": "kimi-k3", "cheap_model": "kimi-k2.6",
+      "api_key_env": "MOONSHOT_API_KEY", "effort_style": "effort+toggle"
+    },
+    {
+      "_说明": "想加更多成员就照着写。下面是本机 Ollama 的例子，不需要 key；enabled 为 false 表示先不参加。",
+      "id": "local", "name": "本地 Qwen", "type": "openai", "enabled": false,
+      "base_url": "http://127.0.0.1:11434/v1", "model": "qwen3:14b", "effort_style": "none"
+    },
+    {
+      "_说明": "cli 也可以是任何命令：问题从标准输入传进去，回答从标准输出读。{model} {effort} 会被替换。",
+      "id": "claude-cli", "name": "Claude（命令行）", "type": "cli", "preset": "claude", "model": "sonnet", "enabled": false
+    }
+  ]
+}

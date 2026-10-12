@@ -1,0 +1,10 @@
+{
+  "name": "qunxian",
+  "version": "0.1.0",
+  "description": "群贤：多模型圆桌讨论。任意数量的大模型独立作答、匿名互评、给出最终立场，由主席写综合报告。Multi-model roundtable with anonymous critique and a synthesis report.",
+  "author": { "name": "HeartY1ng" },
+  "homepage": "https://github.com/HeartY1ng/qunxian",
+  "repository": "https://github.com/HeartY1ng/qunxian",
+  "license": "MIT",
+  "keywords": ["multi-model", "roundtable", "debate", "llm-council", "deepseek", "kimi", "codex"]
+}

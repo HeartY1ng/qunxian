@@ -1,0 +1,14 @@
+{
+  "name": "qunxian",
+  "description": "群贤：多模型圆桌讨论 / Qunxian: multi-model roundtable",
+  "owner": {
+    "name": "HeartY1ng"
+  },
+  "plugins": [
+    {
+      "name": "qunxian",
+      "source": "./",
+      "description": "群贤：多模型圆桌讨论 / Multi-model roundtable"
+    }
+  ]
+}

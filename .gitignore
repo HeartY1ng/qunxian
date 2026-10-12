@@ -1,0 +1,10 @@
+# 用户自己的配置和会议记录（可能含私人话题），绝不进仓库
+.qunxian/
+records/
+
+# Python 运行时生成的缓存
+__pycache__/
+*.pyc
+
+# 系统文件
+.DS_Store
